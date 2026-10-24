@@ -94,6 +94,7 @@ namespace TractorBeam.Client
                 case Verdict.Jointed: return Loc.T("Ce vaisseau est déjà amarré à un autre (porte d'amarrage ou rotor).", "This ship is already joined to another one (docking door or rotor).");
                 case Verdict.Anchored: return Loc.T("Levez l'ancre avant l'appontage.", "Raise the anchor before landing.");
                 case Verdict.Heavier: return Loc.T("Le porteur doit être plus lourd que le vaisseau à poser.", "The carrier must be heavier than the ship to land.");
+                case Verdict.NoRoom: return Loc.T("Pas assez de place sur la plateforme pour ce vaisseau : il toucherait la coque.", "Not enough room on the pad for this ship: it would touch the hull.");
                 default: return v.ToString();
             }
         }
@@ -168,11 +169,17 @@ namespace TractorBeam.Client
             if (text != null) _prompt.text = text;
         }
 
-        /// <summary>The pad zone around the piloted ship's centre (client estimate from the hull box; the host decides).</summary>
-        private static bool FindZone(uint shipId, out bool inside, out PadSpec spec)
+        /// <summary>
+        /// The free pad zone around the piloted ship's centre (client estimate from the hull box; the host decides).
+        /// A pad that holds a ship, or is busy with one, has no zone.
+        /// </summary>
+        private static bool FindZone(uint shipId, out bool inside, out PadSpec spec) => FindZone(shipId, out inside, out spec, out _);
+
+        private static bool FindZone(uint shipId, out bool inside, out PadSpec spec, out PartContext found)
         {
             inside = false;
             spec = null;
+            found = default;
             var ships = Svc.ShipsClient;
             if (ships == null || !ships.TryGetTrackedShip(shipId, out TrackedShipClient ship) || !ship.IsRigidbodyLoaded) return false;
             Transform ct = ship.ShipRigidBody.transform;
@@ -186,17 +193,20 @@ namespace TractorBeam.Client
                 Transform pt = other.ShipRigidBody.transform;
                 foreach (StatefulPart p in Pads.PadsOf(other))
                 {
+                    if (PadBusy(other.Id, p.Id)) continue;
                     var (pp, pr) = Pads.Frame(p);
                     Quaternion inv = Quaternion.Inverse(pt.rotation * pr);
                     Vector3 padWorld = pt.TransformPoint(pp);
                     Vector3 local = inv * (center - padWorld);
-                    PadSpec s = Pads.Spec(p);
-                    if (!Pads.InZone(s, local, 2f) || local.sqrMagnitude >= best) continue;
-                    best = local.sqrMagnitude;
-                    spec = s;
+                    Zone z = Pads.ZoneOf(other.Id, p);
+                    float d = (local - z.Center).sqrMagnitude;
+                    if (!Pads.InZone(z, local, 2f) || d >= best) continue;
+                    best = d;
+                    spec = Pads.Spec(p);
+                    found = new PartContext(other.Id, p.Id);
                     inside = true;
                     foreach (Vector3 c in Tractor.Corners(box))
-                        if (!Pads.InZone(s, inv * (ct.TransformPoint(c) - padWorld), 0.05f))
+                        if (!Pads.InZone(z, inv * (ct.TransformPoint(c) - padWorld), 0.05f))
                         {
                             inside = false;
                             break;
@@ -206,7 +216,10 @@ namespace TractorBeam.Client
             return spec != null;
         }
 
-        /// <summary>Zone outlines of the pads near the camera (or the piloted ship): green when the ship is inside.</summary>
+        /// <summary>
+        /// Zone outlines of the free pads near the camera: green when the piloted ship is entirely inside. The pad whose
+        /// menu is open always shows its zone (orange while the pad is taken: the zone is off).
+        /// </summary>
         private static void UpdateOutlines(uint piloted)
         {
             var ships = Svc.ShipsClient;
@@ -214,8 +227,10 @@ namespace TractorBeam.Client
             var seen = new HashSet<(uint, ushort)>();
             if (ships != null && cam != null)
             {
+                PartContext target = default;
                 bool inside = false;
-                if (piloted != 0) FindZone(piloted, out inside, out _);
+                if (piloted != 0) FindZone(piloted, out inside, out _, out target);
+                PartContext? editing = PadMenu.Editing;
                 Vector3 eye = cam.transform.position;
                 foreach (TrackedShipClient ship in ships.Ships)
                 {
@@ -223,16 +238,21 @@ namespace TractorBeam.Client
                     Transform vt = ship.VisualObject.transform;
                     foreach (StatefulPart p in Pads.PadsOf(ship))
                     {
-                        PadSpec s = Pads.Spec(p);
+                        var key = (ship.Id, p.Id);
+                        bool edited = editing.HasValue && editing.Value.ShipId == ship.Id && editing.Value.PartId == p.Id;
+                        bool busy = PadBusy(ship.Id, p.Id);
+                        Zone z = Pads.ZoneOf(ship.Id, p);
                         var (pp, pr) = Pads.Frame(p);
                         Vector3 local = Quaternion.Inverse(vt.rotation * pr) * (eye - vt.TransformPoint(pp));
-                        bool occupied = PadBusy(ship.Id, p.Id);
-                        if (occupied || !Pads.InZone(s, local, 25f)) continue;
-                        var key = (ship.Id, p.Id);
+                        if (!edited && (busy || !Pads.InZone(z, local, 25f))) continue;
                         seen.Add(key);
-                        if (!Outlines.TryGetValue(key, out ZoneOutline o) || o.Broken)
-                            Outlines[key] = o = new ZoneOutline(vt, pp, pr, s);
-                        o.SetColor(piloted != 0 && inside && Pads.InZone(s, local, 0f) ? UiColors.Good : UiColors.Accent);
+                        if (!Outlines.TryGetValue(key, out ZoneOutline o) || o.Broken || !o.Shows(z))
+                        {
+                            o?.Destroy();
+                            Outlines[key] = o = new ZoneOutline(vt, pp, pr, z);
+                        }
+                        bool here = inside && target.ShipId == ship.Id && target.PartId == p.Id;
+                        o.SetColor(edited && busy ? UiColors.Warning : edited ? UiColors.Edit : here ? UiColors.Good : UiColors.Accent);
                     }
                 }
             }
@@ -248,7 +268,7 @@ namespace TractorBeam.Client
                 }
         }
 
-        private static bool PadBusy(uint parent, ushort pad)
+        public static bool PadBusy(uint parent, ushort pad)
         {
             foreach (var d in Docks.Known.Values)
                 if (d.Parent == parent && d.Pad == pad) return true;
@@ -297,5 +317,6 @@ namespace TractorBeam.Client
         public static readonly Color Accent = new Color(0.35f, 0.75f, 1f, 1f);
         public static readonly Color Warning = new Color(1f, 0.55f, 0.32f, 1f);
         public static readonly Color Good = new Color(0.45f, 0.9f, 0.55f, 1f);
+        public static readonly Color Edit = new Color(1f, 0.85f, 0.3f, 1f);
     }
 }

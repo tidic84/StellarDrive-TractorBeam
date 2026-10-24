@@ -72,6 +72,7 @@ namespace TractorBeam.Docking
         private static HashSet<uint> _inertiaNext = new HashSet<uint>(), _inertiaNow = new HashSet<uint>();
 
         private static bool _markAllOnNextTick;
+        private static readonly HashSet<uint> _orphanSuspects = new HashSet<uint>();
         private static float _nextOrphanCheck;
 
         public static void Patch(HarmonyLib.Harmony h)
@@ -97,7 +98,11 @@ namespace TractorBeam.Docking
         }
 
         /// <summary>Server state lives as long as the world (reloaded with the next one).</summary>
-        public static void ResetServer() => Server.Clear();
+        public static void ResetServer()
+        {
+            Server.Clear();
+            _orphanSuspects.Clear();
+        }
 
         public static bool IsDockedChild(uint shipId) => Server.ContainsKey(shipId);
 
@@ -216,11 +221,22 @@ namespace TractorBeam.Docking
             var joints = Svc.JointsServer;
             var spaces = Svc.SpacesServer;
             if (joints == null || spaces == null) return;
+            var suspects = new HashSet<uint>(_orphanSuspects);
+            _orphanSuspects.Clear();
             foreach (TrackedShipServer ship in ships.Ships)
             {
                 if (Server.ContainsKey(ship.Id) || Tractor.IsBusy(ship.Id)) continue;
                 if (!(spaces.GetSpace(ship.SpaceId) is ShipRelativeSpace rel)) continue;
                 if (joints.TryGetShipJoint(ship.Id, out TrackedShipJoint j) && j.Parent != null) continue;
+                // held by a rotor or a docking door: the game joins it (maybe not yet, just after loading)
+                if (NativelyJoined(Svc.JointChangesServer, ships, rel.ShipId, ship.Id)) continue;
+                // and only once it has stayed that way for a whole check
+                if (!suspects.Contains(ship.Id))
+                {
+                    _orphanSuspects.Add(ship.Id);
+                    continue;
+                }
+                _orphanSuspects.Add(ship.Id);
                 TrackedShipServer parent = ships.GetShip(rel.ShipId);
                 StatefulPart pad = parent == null ? null : Pads.PadsOf(parent)
                     .Where(p => OnPad(parent.Id, p.Id) == null)
@@ -298,17 +314,19 @@ namespace TractorBeam.Docking
             __result = list;
         }
 
-        /// <summary>Client: the two ships already share a rotor or a docked docking door (the game joins those itself).</summary>
-        private static bool NativelyJoined(ShipsJointsChangeProvider changes, uint parent, uint child)
+        private static bool NativelyJoined(ShipsJointsChangeProvider changes, uint parent, uint child) =>
+            NativelyJoined(changes, Svc.ShipsClient, parent, child);
+
+        /// <summary>The two ships share a rotor or a docked docking door (the game joins those itself).</summary>
+        private static bool NativelyJoined(ShipsJointsChangeProvider changes, IShipsProvider ships, uint parent, uint child)
         {
-            if (RotorsRef(changes).TryGetValue(child, out List<RotorJointData> rotors))
+            if (changes != null && RotorsRef(changes).TryGetValue(child, out List<RotorJointData> rotors))
                 foreach (RotorJointData d in rotors)
                     if (d.OtherShipId == parent || d.RotorPart.ShipId == parent)
                         return true;
-            var ships = Svc.ShipsClient;
             if (ships == null) return false;
             foreach (var (a, b) in new[] { (child, parent), (parent, child) })
-                if (ships.TryGetTrackedShip(a, out TrackedShipClient s))
+                if (ships.TryGetShip(a, out Ships.Interface.Model.State.IShipStateRead s))
                     foreach (StatefulPart door in s.GetAllStatefulParts<DockingDoorState>())
                         if (door.State is DockingDoorState d && d.IsDocked && d.DockedConnectedPart.ShipId == b)
                             return true;

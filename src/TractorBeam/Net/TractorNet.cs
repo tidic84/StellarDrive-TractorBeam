@@ -22,11 +22,13 @@ namespace TractorBeam.Net
         // client -> server
         Hello = 1,
         Request = 2,
+        SetZone = 3,
 
         // server -> client
         Result = 64,
         Beam = 65,
         Docks = 66,
+        Zones = 67,
     }
 
     /// <summary>Registers the broadcast with whichever NetworkManager is running and routes packets by opcode.</summary>

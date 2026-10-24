@@ -19,14 +19,13 @@ using Object = UnityEngine.Object;
 namespace TractorBeam.Content
 {
     /// <summary>
-    /// The three tractor pads. Each is a copy of the game's signal display (so placement, saving, network sync and the
-    /// build tool all come from the game) with our model; the display screen is hidden. They sit next to the docking
-    /// door: same build menu row, unlocked by the same research.
+    /// The three tractor pads. Each is a copy of the game's targeting computer (so placement, saving, network sync, the
+    /// build tool and the E interaction that opens a menu all come from the game) with our model; the computer's screen
+    /// is hidden and its menu replaced by the pad's (<see cref="Client.PadMenu"/>). They sit next to the docking door:
+    /// same build menu row, unlocked by the same research.
     /// </summary>
     internal static class PadParts
     {
-        private const ushort DisplayId = 82;
-
         private static readonly Dictionary<ushort, PartSettings> Parts = new Dictionary<ushort, PartSettings>();
         private static bool _building;
 
@@ -57,8 +56,13 @@ namespace TractorBeam.Content
             try
             {
                 PartSettings[] all = Resources.FindObjectsOfTypeAll<PartSettings>();
-                PartSettings display = all.FirstOrDefault(p => p.id == DisplayId);
-                if (display == null) return;
+                PartSettings display = all.Where(p => p.id < 9000 && p.part != null)
+                    .FirstOrDefault(p => p.part.GetComponentInChildren<Ships.Parts.TargetingComputer.TargetingComputerVisuals>(true) != null);
+                if (display == null)
+                {
+                    TractorMod.Log.Error("Targeting computer part not found: tractor pads disabled.");
+                    return;
+                }
                 // the game indexes parts by id: a second part with one of our ids would break every world load
                 PartSettings taken = all.FirstOrDefault(p => Pads.Spec(p.id) != null && !p.name.StartsWith("TractorBeam."));
                 if (taken != null)
@@ -122,10 +126,16 @@ namespace TractorBeam.Content
                 bounds.center = boundsCenter;
                 bounds.bounds = boundsSize;
             }
-            Transform visuals = prefab.transform.Find("Visuals") ?? prefab.transform;
+            // the computer's screen goes, our model goes under its visual component (the game copies that object for
+            // the ship, the build preview and the menu thumbnail)
+            Transform visuals = (prefab.GetComponentInChildren<Ships.Parts.Common.Model.Reactions.IShipPartVisual>(true) as Component)?.transform ?? prefab.transform;
             foreach (Transform t in visuals.Cast<Transform>().ToList())
                 t.gameObject.SetActive(false);
             PadModel.Build(size).transform.SetParent(visuals, false);
+            // nor the arrows it points at its target with
+            foreach (var tip in prefab.GetComponentsInChildren<Ships.Parts.Common.Tips.PartTip>(true))
+                foreach (Transform t in tip.transform)
+                    t.gameObject.SetActive(false);
             BoxCollider box = prefab.transform.Find("Interactions")?.GetComponentInChildren<BoxCollider>(true);
             if (box != null)
             {
@@ -134,7 +144,7 @@ namespace TractorBeam.Content
                 box.center = boundsCenter;
                 box.size = boundsSize;
             }
-            // the display's signal input is not used: tuck it under the plate
+            // the computer's signal outputs are not used: tuck them under the plate
             foreach (var socket in prefab.GetComponentsInChildren<Ships.Interface.Model.Parts.Common.SocketObject>(true))
                 socket.transform.localPosition = new Vector3(0f, 0.03f, -0.45f);
             p.part = prefab;

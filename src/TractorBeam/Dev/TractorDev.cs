@@ -182,6 +182,64 @@ namespace TractorBeam
                 }
             });
             _harness.Command("press", a => TractorBeam.Net.TractorNet.SendToServer(TractorBeam.Net.Op.Request, null));
+            _harness.Command("zoneset", a =>
+            {
+                // zoneset <carrier> bx by bz sx sy sz: the zone of the carrier's first pad (pad frame), as the menu would
+                TrackedShipServer carrier = Svc.ShipsServer.GetShip(uint.Parse(a[1]));
+                var pad = Pads.PadsOf(carrier).First();
+                var cfg = new PadConfig { Zone = new Zone { Bottom = new Vector3(Fl(a[2]), Fl(a[3]), Fl(a[4])), Size = new Vector3(Fl(a[5]), Fl(a[6]), Fl(a[7])) } }.Clamped(Pads.Spec(pad));
+                PadConfigs.Set(new Ships.Interface.Model.Parts.PartContext(carrier.Id, pad.Id), cfg);
+                Log.Msg($"[DEV] zone of pad {pad.Id}: bottom {cfg.Zone.Bottom} size {cfg.Zone.Size}");
+            });
+            _harness.Command("bringzone", a =>
+            {
+                // bringzone <ship> <carrier> [yaw]: puts the ship in the middle of the carrier's first pad zone, at rest
+                var ships = Svc.ShipsServer;
+                TrackedShipServer ship = ships.GetShip(uint.Parse(a[1])), carrier = ships.GetShip(uint.Parse(a[2]));
+                var pad = Pads.PadsOf(carrier).First();
+                Zone z = Pads.ZoneOf(carrier.Id, pad);
+                var (pp, pr) = Pads.Frame(pad);
+                Transform pt = carrier.RigidbodyObject.transform;
+                var b = ship.GetHullCoordBounds();
+                Quaternion rot = pt.rotation * pr * Quaternion.Euler(0f, a.Length > 3 ? Fl(a[3]) : 20f, 0f);
+                Vector3 pos = pt.TransformPoint(pp + pr * z.Center) - rot * b.Center;
+                ServiceLocator.GetService<ISpacesServerProvider>().SetWorldObjectPhysics(ship, carrier.SpaceId, new LocalPhysicsState { Position = pos, Rotation = rot, Velocity = Vector3.zero });
+                ship.NotifyRepositioned();
+                Log.Msg($"[DEV] ship {ship.Id} in the zone of pad {pad.Id} of ship {carrier.Id}");
+            });
+            _harness.Command("usepad", a =>
+            {
+                // usepad <carrier>: the local player opens the menu of the carrier's first pad (as with E)
+                TrackedShipServer ship = Svc.ShipsServer.GetShip(uint.Parse(a[1]));
+                var pad = Pads.PadsOf(ship).First();
+                var service = Object.FindObjectsByType<Managers.Server.Services.ShipInteractionService>(FindObjectsSortMode.None).First();
+                HarmonyLib.Traverse.Create(service).Method("PlayerStartInteracting", Svc.PlayersServer.ActivePlayers.First(), ship, pad).GetValue();
+                Log.Msg($"[DEV] using pad {pad.Id}");
+            });
+            _harness.Command("prefab", a =>
+            {
+                // prefab <settings id>: the hierarchy of a part's prefab, with components
+                var settings = Resources.FindObjectsOfTypeAll<PartSettings>().First(p => p.id == ushort.Parse(a[1]));
+                void Dump(Transform t, string indent)
+                {
+                    Log.Msg($"[DEV] {indent}{t.name} [{(t.gameObject.activeSelf ? "on" : "off")}] {t.localPosition:F2} : {string.Join(", ", t.GetComponents<Component>().Select(c => c.GetType().Name))}");
+                    foreach (Transform c in t) Dump(c, indent + "  ");
+                }
+                Dump(settings.part.transform, "");
+            });
+            _harness.Command("uiclick", a =>
+            {
+                // uiclick <n>: clicks the n-th button of the pad menu (0 = first row's -5)
+                var canvas = GameObject.Find("TractorBeam.PadMenu");
+                var buttons = canvas.GetComponentsInChildren<UnityEngine.UI.Button>();
+                buttons[int.Parse(a[1])].onClick.Invoke();
+                Log.Msg($"[DEV] clicked button {a[1]} of {buttons.Length}");
+            });
+            _harness.Command("state", a =>
+            {
+                Svc.PlayersClient.TryGetLocalPlayerState(out Players.Interface.Model.PlayerState st);
+                Log.Msg($"[DEV] player {st.Type} {st.EntityId}/{st.PartId}, menu {(GameObject.Find("TractorBeam.PadMenu")?.activeSelf == true ? "open" : "closed")}, cursor {Cursor.lockState}");
+            });
             _harness.Command("land", a => Log.Msg($"[DEV] land {a[1]}: {Tractor.Request(uint.Parse(a[1]))}"));
             _harness.Command("launch", a => Log.Msg($"[DEV] launch {a[1]}: {Tractor.Request(uint.Parse(a[1]))}"));
             _harness.Command("docks", a =>

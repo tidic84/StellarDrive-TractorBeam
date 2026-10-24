@@ -36,6 +36,7 @@ namespace TractorBeam.Docking
         Jointed = 19,
         Anchored = 20,
         Heavier = 21,
+        NoRoom = 22,
     }
 
     /// <summary>A pose in the carrier's frame.</summary>
@@ -54,12 +55,36 @@ namespace TractorBeam.Docking
     /// <summary>One leg of a beam animation, in the carrier's frame.</summary>
     internal struct Leg
     {
-        public enum Kind { Brake, Smooth, SetDown }
+        public enum Kind { Brake, Smooth, SetDown, Path }
 
         public Kind Ease;
         public Pose A, B;
         public Vector3 V0;
         public float Duration;
+        /// <summary>Path: the corners from A to B (both included), followed at an eased speed.</summary>
+        public Vector3[] Points;
+
+        public float Length
+        {
+            get
+            {
+                if (Ease != Kind.Path || Points == null) return Vector3.Distance(A.P, B.P);
+                float l = 0f;
+                for (int i = 1; i < Points.Length; i++) l += Vector3.Distance(Points[i - 1], Points[i]);
+                return l;
+            }
+        }
+
+        private Vector3 Along(float d)
+        {
+            for (int i = 1; i < Points.Length; i++)
+            {
+                float seg = Vector3.Distance(Points[i - 1], Points[i]);
+                if (d <= seg || i == Points.Length - 1) return Vector3.Lerp(Points[i - 1], Points[i], seg > 0f ? Mathf.Clamp01(d / seg) : 1f);
+                d -= seg;
+            }
+            return Points[Points.Length - 1];
+        }
 
         public Pose Sample(float t)
         {
@@ -70,6 +95,9 @@ namespace TractorBeam.Docking
                     // keeps the speed it came in with and brakes it to zero
                     float s = u * Duration;
                     return new Pose(A.P + V0 * (s - s * s / (2f * Duration)), Quaternion.Slerp(A.R, B.R, u * u * (3f - 2f * u)));
+                case Kind.Path:
+                    float p = u * u * u * (u * (u * 6f - 15f) + 10f);
+                    return new Pose(Along(p * Length), Quaternion.Slerp(A.R, B.R, p));
                 case Kind.SetDown:
                     float d = 1f - (1f - u) * (1f - u) * (1f - u);
                     return new Pose(Vector3.LerpUnclamped(A.P, B.P, d), Quaternion.Slerp(A.R, B.R, d));
@@ -223,7 +251,8 @@ namespace TractorBeam.Docking
             Bounds box = LocalBounds(shapes);
             Vector3 center = ct.TransformPoint(box.center);
 
-            // the pad whose zone holds the ship's centre (a little margin: the next checks say what is wrong)
+            // the free pad whose zone holds the ship's centre (a little margin: the next checks say what is wrong);
+            // a pad that already holds a ship, or is busy with one, has no zone at all
             TrackedShipServer carrier = null;
             StatefulPart pad = null;
             float best = float.MaxValue;
@@ -233,10 +262,12 @@ namespace TractorBeam.Docking
                 Transform pt = other.RigidbodyObject.transform;
                 foreach (StatefulPart p in Pads.PadsOf(other))
                 {
+                    if (PadBusy(other.Id, p.Id)) continue;
                     var (pp, pr) = Pads.Frame(p);
+                    Zone z = Pads.ZoneOf(other.Id, p);
                     Vector3 local = Quaternion.Inverse(pt.rotation * pr) * (center - pt.TransformPoint(pp));
-                    if (!Pads.InZone(Pads.Spec(p), local, 2f)) continue;
-                    float d = local.sqrMagnitude;
+                    if (!Pads.InZone(z, local, 2f)) continue;
+                    float d = (local - z.Center).sqrMagnitude;
                     if (d < best)
                     {
                         best = d;
@@ -246,8 +277,8 @@ namespace TractorBeam.Docking
                 }
             }
             if (pad == null) return Verdict.NoZone;
-            if (PadBusy(carrier.Id, pad.Id)) return Verdict.PadBusy;
             PadSpec spec = Pads.Spec(pad);
+            Zone zone = Pads.ZoneOf(carrier.Id, pad);
             if (ship.HullAndPartsMass >= carrier.HullAndPartsMass) return Verdict.Heavier;
 
             Transform ptr = carrier.RigidbodyObject.transform;
@@ -255,7 +286,7 @@ namespace TractorBeam.Docking
             Quaternion padWorldRot = ptr.rotation * padRot;
             Vector3 padWorld = ptr.TransformPoint(padPos);
             foreach (Vector3 c in Corners(box))
-                if (!Pads.InZone(spec, Quaternion.Inverse(padWorldRot) * (ct.TransformPoint(c) - padWorld), 0.05f))
+                if (!Pads.InZone(zone, Quaternion.Inverse(padWorldRot) * (ct.TransformPoint(c) - padWorld), 0.05f))
                     return Verdict.NotInside;
 
             Rigidbody root = ptr.GetComponentInParent<Rigidbody>();
@@ -287,13 +318,49 @@ namespace TractorBeam.Docking
             float brake = Mathf.Clamp(2f * BrakeDistance / Mathf.Max(v0.magnitude, 0.01f), 0.25f, 1f);
             var caught = new Pose(start.P + v0 * (brake * 0.5f), start.R);
 
-            var op = new TractorOp { Child = shipId, Parent = carrier.Id, Pad = pad.Id, Landed = landed, Exit = caught };
-            op.Legs.Add(new Leg { Ease = Leg.Kind.Brake, A = start, B = caught, V0 = v0, Duration = brake });
-            op.Legs.Add(new Leg { Ease = Leg.Kind.Smooth, A = caught, B = hover, Duration = CarrySeconds(caught, hover) });
-            op.Legs.Add(new Leg { Ease = Leg.Kind.SetDown, A = hover, B = landed, Duration = SetDownSeconds });
-            if (!PathClear(ship, ct, shapes, ptr, op, 1)) return Verdict.Blocked;
-            Begin(op);
-            return Verdict.Landing;
+            // the spot itself first: no route helps if the ship does not fit on the pad
+            var settle = new TractorOp { Child = shipId, Parent = carrier.Id, Pad = pad.Id };
+            settle.Legs.Add(new Leg { Ease = Leg.Kind.SetDown, A = hover, B = landed, Duration = SetDownSeconds });
+            if (!PathClear(ship, ct, shapes, ptr, settle, 0)) return Verdict.NoRoom;
+
+            foreach (Vector3[] route in Routes(caught.P, hover.P, padPos, padRot))
+            {
+                var op = new TractorOp { Child = shipId, Parent = carrier.Id, Pad = pad.Id, Landed = landed, Exit = caught };
+                op.Legs.Add(new Leg { Ease = Leg.Kind.Brake, A = start, B = caught, V0 = v0, Duration = brake });
+                op.Legs.Add(Carry(caught, hover, route));
+                op.Legs.Add(new Leg { Ease = Leg.Kind.SetDown, A = hover, B = landed, Duration = SetDownSeconds });
+                if (!PathClear(ship, ct, shapes, ptr, op, 1)) continue;
+                Begin(op);
+                return Verdict.Landing;
+            }
+            return Verdict.Blocked;
+        }
+
+        /// <summary>
+        /// Ways from a point of the zone to the hover point above the pad (carrier frame), in the order they are tried:
+        /// straight; across at the zone's height then down; up over everything then across then down (higher and higher).
+        /// The first one the ship fits through is used, and played backwards to leave.
+        /// </summary>
+        private static IEnumerable<Vector3[]> Routes(Vector3 from, Vector3 to, Vector3 padPos, Quaternion padRot)
+        {
+            Quaternion inv = Quaternion.Inverse(padRot);
+            Vector3 a = inv * (from - padPos), b = inv * (to - padPos);
+            Vector3 C(Vector3 v) => padPos + padRot * v;
+            yield return new[] { from, to };
+            if (Mathf.Abs(a.y - b.y) > 0.5f)
+                yield return new[] { from, C(new Vector3(b.x, a.y, b.z)), to };
+            foreach (float extra in new[] { 0f, 3f, 8f, 16f })
+            {
+                float top = Mathf.Max(a.y, b.y) + extra;
+                yield return new[] { from, C(new Vector3(a.x, top, a.z)), C(new Vector3(b.x, top, b.z)), to };
+            }
+        }
+
+        private static Leg Carry(Pose a, Pose b, Vector3[] route)
+        {
+            var leg = new Leg { Ease = Leg.Kind.Path, A = a, B = b, Points = route };
+            leg.Duration = Mathf.Clamp(leg.Length / 3.5f + Quaternion.Angle(a.R, b.R) / 45f + (route.Length - 2) * 0.6f, 1.5f, 16f);
+            return leg;
         }
 
         private static Verdict StartLaunch(uint shipId)
@@ -305,7 +372,7 @@ namespace TractorBeam.Docking
             if (!carrier.TryGetStatefulPart(rec.Pad, out StatefulPart pad)) return Verdict.Busy;
             Transform ct = ship.RigidbodyObject.transform, ptr = carrier.RigidbodyObject.transform;
             List<Shape> shapes = Shapes(ship);
-            var (_, padRot) = Pads.Frame(pad);
+            var (padPos, padRot) = Pads.Frame(pad);
             Vector3 up = padRot * Vector3.up;
             var landed = new Pose(rec.LocalPos, rec.LocalRot);
             var hover = new Pose(landed.P + up * HoverHeight, landed.R);
@@ -316,14 +383,20 @@ namespace TractorBeam.Docking
                 : new[] { new Pose(hover.P + up * rise, hover.R), hover };
             foreach (Pose exit in exits)
             {
-                var op = new TractorOp { Child = shipId, Parent = rec.Parent, Pad = rec.Pad, Launch = true, Landed = landed, Exit = exit };
-                op.Legs.Add(new Leg { Ease = Leg.Kind.Smooth, A = landed, B = hover, Duration = LiftSeconds });
-                if ((exit.P - hover.P).sqrMagnitude > 0.01f || Quaternion.Angle(exit.R, hover.R) > 1f)
-                    op.Legs.Add(new Leg { Ease = Leg.Kind.Smooth, A = hover, B = exit, Duration = CarrySeconds(hover, exit) });
-                if (!PathClear(ship, ct, shapes, ptr, op, 0)) continue;
-                Docks.Remove(shipId);
-                Begin(op);
-                return Verdict.Launching;
+                bool moves = (exit.P - hover.P).sqrMagnitude > 0.01f || Quaternion.Angle(exit.R, hover.R) > 1f;
+                IEnumerable<Vector3[]> routes = moves
+                    ? Routes(exit.P, hover.P, padPos, padRot).Select(r => r.Reverse().ToArray())
+                    : new[] { (Vector3[])null };
+                foreach (Vector3[] route in routes)
+                {
+                    var op = new TractorOp { Child = shipId, Parent = rec.Parent, Pad = rec.Pad, Launch = true, Landed = landed, Exit = exit };
+                    op.Legs.Add(new Leg { Ease = Leg.Kind.Smooth, A = landed, B = hover, Duration = LiftSeconds });
+                    if (route != null) op.Legs.Add(Carry(hover, exit, route));
+                    if (!PathClear(ship, ct, shapes, ptr, op, 0)) continue;
+                    Docks.Remove(shipId);
+                    Begin(op);
+                    return Verdict.Launching;
+                }
             }
             return Verdict.Blocked;
         }
@@ -546,26 +619,28 @@ namespace TractorBeam.Docking
         /// </summary>
         private static bool PathClear(TrackedShipServer ship, Transform ct, List<Shape> shapes, Transform carrier, TractorOp op, int firstLeg)
         {
-            float t0 = 0f;
-            for (int i = 0; i < firstLeg; i++) t0 += op.Legs[i].Duration;
-            float total = op.Total;
-            const int Samples = 10;
             PhysicsScene scene = ct.gameObject.scene.GetPhysicsScene();
-            // leaving, the ship already sits at the start of its path: what touches it there does not count
-            for (int k = op.Launch ? 1 : 0; k <= Samples; k++)
+            for (int l = firstLeg; l < op.Legs.Count; l++)
             {
-                Pose p = op.Sample(Mathf.Lerp(t0, total, k / (float)Samples));
-                Vector3 pos = carrier.TransformPoint(p.P);
-                Quaternion rot = carrier.rotation * p.R;
-                foreach (Shape s in shapes)
+                Leg leg = op.Legs[l];
+                // a sample every half metre and every 10 degrees of turn
+                int samples = Mathf.Clamp(Mathf.CeilToInt(leg.Length / 0.5f) + Mathf.CeilToInt(Quaternion.Angle(leg.A.R, leg.B.R) / 10f), 2, 160);
+                // leaving, the ship already sits at the start of its path: what touches it there does not count
+                for (int k = op.Launch && l == firstLeg ? 1 : 0; k <= samples; k++)
                 {
-                    Vector3 half = Vector3.Max(s.Half - Vector3.one * Shrink, Vector3.one * 0.01f);
-                    int n = scene.OverlapBox(pos + rot * s.Center, half, Hits, rot * s.Rot, Mask, QueryTriggerInteraction.Ignore);
-                    for (int i = 0; i < n; i++)
+                    Pose p = leg.Sample(leg.Duration * k / samples);
+                    Vector3 pos = carrier.TransformPoint(p.P);
+                    Quaternion rot = carrier.rotation * p.R;
+                    foreach (Shape s in shapes)
                     {
-                        if (Hits[i].transform.IsChildOf(ct)) continue;
-                        TractorMod.Log.Msg($"Beam path of ship {ship.Id} blocked at {k * 10}% by {Hits[i].name} ({LayerMask.LayerToName(Hits[i].gameObject.layer)}).");
-                        return false;
+                        Vector3 half = Vector3.Max(s.Half - Vector3.one * Shrink, Vector3.one * 0.01f);
+                        int n = scene.OverlapBox(pos + rot * s.Center, half, Hits, rot * s.Rot, Mask, QueryTriggerInteraction.Ignore);
+                        for (int i = 0; i < n; i++)
+                        {
+                            if (Hits[i].transform.IsChildOf(ct)) continue;
+                            TractorMod.Log.Msg($"Beam path of ship {ship.Id} blocked (leg {l}, {100 * k / samples}%) by {Hits[i].name} ({LayerMask.LayerToName(Hits[i].gameObject.layer)}).");
+                            return false;
+                        }
                     }
                 }
             }

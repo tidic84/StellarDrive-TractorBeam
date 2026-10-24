@@ -48,6 +48,16 @@ namespace TractorBeam.Visual
             return m;
         }
 
+        /// <summary>A flat colour on the spark material (lines: it does not take vertex colours).</summary>
+        public static Material Tint(Color c, float intensity)
+        {
+            var m = new Material(Spark) { name = "TractorBeam.Tint" };
+            m.SetColor("_BaseColor", c);
+            m.SetColor("_Color", c);
+            m.SetColor("_EmissionColor", c * intensity);
+            return m;
+        }
+
         public static GameObject MeshChild(Transform parent, string name, Mesh mesh, Material mat)
         {
             var go = new GameObject(name);

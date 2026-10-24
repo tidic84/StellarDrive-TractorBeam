@@ -148,11 +148,15 @@ namespace TractorBeam.Client
         private readonly GameObject _go;
         private readonly LineRenderer _line;
         private Color _color = Color.clear;
+        private readonly Zone _zone;
 
         public bool Broken => _go == null;
 
-        public ZoneOutline(Transform parent, Vector3 pos, Quaternion rot, PadSpec spec)
+        public bool Shows(Zone z) => z.Bottom == _zone.Bottom && z.Size == _zone.Size;
+
+        public ZoneOutline(Transform parent, Vector3 pos, Quaternion rot, Zone zone)
         {
+            _zone = zone;
             _go = new GameObject("TractorBeam.Zone");
             _go.transform.SetParent(parent, false);
             _go.transform.localPosition = pos;
@@ -162,12 +166,13 @@ namespace TractorBeam.Client
             _line.widthMultiplier = 0.06f;
             _line.numCornerVertices = 0;
             _line.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            float h = spec.Width * 0.5f, y = spec.Height;
-            Vector3 B(float x, float z) => new Vector3(x, 0.02f, z);
-            Vector3 T(float x, float z) => new Vector3(x, y, z);
+            float hx = zone.Size.x * 0.5f, hz = zone.Size.z * 0.5f, y0 = zone.Bottom.y + 0.02f, y1 = zone.Bottom.y + zone.Size.y;
+            Vector3 o = zone.Bottom;
+            Vector3 B(float x, float z) => new Vector3(o.x + x * hx, y0, o.z + z * hz);
+            Vector3 T(float x, float z) => new Vector3(o.x + x * hx, y1, o.z + z * hz);
             var pts = new[]
             {
-                B(-h, -h), B(h, -h), B(h, h), B(-h, h), B(-h, -h), T(-h, -h), T(h, -h), B(h, -h), T(h, -h), T(h, h), B(h, h), T(h, h), T(-h, h), B(-h, h), T(-h, h), T(-h, -h),
+                B(-1, -1), B(1, -1), B(1, 1), B(-1, 1), B(-1, -1), T(-1, -1), T(1, -1), B(1, -1), T(1, -1), T(1, 1), B(1, 1), T(1, 1), T(-1, 1), B(-1, 1), T(-1, 1), T(-1, -1),
             };
             _line.positionCount = pts.Length;
             _line.SetPositions(pts);
@@ -178,7 +183,7 @@ namespace TractorBeam.Client
             if (_line == null || c == _color) return;
             _color = c;
             // the glow material ignores vertex colours: one material per colour
-            if (!Materials.TryGetValue(c, out Material m) || m == null) Materials[c] = m = Assets.Glow(c, 0.9f);
+            if (!Materials.TryGetValue(c, out Material m) || m == null) Materials[c] = m = Assets.Tint(c, 1.2f);
             _line.sharedMaterial = m;
         }
 

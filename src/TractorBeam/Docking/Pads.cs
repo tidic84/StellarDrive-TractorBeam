@@ -5,18 +5,30 @@ using UnityEngine;
 
 namespace TractorBeam.Docking
 {
-    /// <summary>One size of tractor pad: the landing zone is a box standing on the pad, Width x Width x Height.</summary>
+    /// <summary>One size of tractor pad: the biggest zone and ship it takes (Width x Width x Height), and how far the zone may go.</summary>
     internal sealed class PadSpec
     {
         public ushort Id;
         public float Width, Height;
+
+        /// <summary>How far from the pad the zone may be moved, on each axis.</summary>
+        public float Reach => Width * 2.5f;
         public string Fr, En;
+    }
+
+    /// <summary>A landing zone in its pad's frame: a box standing on <see cref="Bottom"/> (centre of its floor).</summary>
+    internal struct Zone
+    {
+        public Vector3 Bottom, Size;
+
+        public Vector3 Center => Bottom + new Vector3(0f, Size.y * 0.5f, 0f);
     }
 
     /// <summary>
     /// The tractor pads and their landing zones. A pad is placed on a floor; its frame has its origin at the centre of
-    /// the pad's top face, y along the part's up (the landing direction) and z along its forward. The zone is
-    /// |x| ≤ W/2, |z| ≤ W/2, 0 ≤ y ≤ H in that frame.
+    /// the pad's top face, y along the part's up (the landing direction) and z along its forward. The zone is a box in
+    /// that frame, set from the pad's menu: by default it stands on the pad, Width x Width x Height; it can be moved
+    /// anywhere around the carrier (outside the hull, in front of a hangar door...) and made smaller.
     /// </summary>
     internal static class Pads
     {
@@ -59,10 +71,14 @@ namespace TractorBeam.Docking
             return (pad.LocalPosition + r * new Vector3(0f, TopHeight, 0f), r);
         }
 
-        public static bool InZone(PadSpec spec, Vector3 padLocal, float margin = 0f)
+        /// <summary>The pad's landing zone (its configuration, or the default: centred on the pad, as big as its size allows).</summary>
+        public static Zone ZoneOf(uint ship, StatefulPart pad) => PadConfigs.Get(ship, pad).Zone;
+
+        public static bool InZone(Zone zone, Vector3 padLocal, float margin = 0f)
         {
-            float h = spec.Width * 0.5f + margin;
-            return Mathf.Abs(padLocal.x) <= h && Mathf.Abs(padLocal.z) <= h && padLocal.y >= -margin && padLocal.y <= spec.Height + margin;
+            Vector3 d = padLocal - zone.Bottom;
+            return Mathf.Abs(d.x) <= zone.Size.x * 0.5f + margin && Mathf.Abs(d.z) <= zone.Size.z * 0.5f + margin
+                && d.y >= -margin && d.y <= zone.Size.y + margin;
         }
     }
 }

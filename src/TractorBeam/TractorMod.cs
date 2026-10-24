@@ -7,7 +7,7 @@ using TractorBeam.Net;
 using TractorBeam.Visual;
 using UnityEngine.SceneManagement;
 
-[assembly: MelonInfo(typeof(TractorBeam.TractorMod), "TractorBeam", "0.1.0", "tidic84")]
+[assembly: MelonInfo(typeof(TractorBeam.TractorMod), "TractorBeam", "0.2.0", "tidic84")]
 [assembly: MelonGame("CuriousOwlGames", "StellarDrive")]
 
 namespace TractorBeam
@@ -28,6 +28,8 @@ namespace TractorBeam
             MelonPreferences_Category prefs = MelonPreferences.CreateCategory("TractorBeam", "Tractor Beam");
             PadParts.Patch(HarmonyInstance);
             Docks.Patch(HarmonyInstance);
+            PadConfigs.Patch(HarmonyInstance);
+            PadMenu.Patch(HarmonyInstance);
             Tractor.Patch(HarmonyInstance);
             TractorClient.Init(prefs);
 #if DEV
@@ -43,6 +45,7 @@ namespace TractorBeam
             UiKit.ClearCache();
             Docks.Reset();
             TractorClient.Reset();
+            PadMenu.Reset();
             if (sceneName == MainGameScene)
             {
                 PadParts.EnsureParts();
@@ -59,6 +62,7 @@ namespace TractorBeam
             if (sceneName == MainGameScene)
             {
                 Docks.ResetServer();
+                PadConfigs.Reset();
                 Tractor.ResetServer();
             }
         }
@@ -70,6 +74,7 @@ namespace TractorBeam
             {
                 Docks.ClientTick();
                 TractorClient.Update();
+                PadMenu.Update();
             }
 #if DEV
             DevUpdate();
