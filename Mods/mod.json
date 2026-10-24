@@ -1,0 +1,8 @@
+{
+    "id": "tractorbeam",
+    "name": "Tractor Beam",
+    "author": "tidic84",
+    "version": "0.1.0",
+    "description": "Tractor beam landing pads for big ships. Build a pad (small, medium or large) on your carrier; it watches a landing zone above it. Fly a smaller ship entirely into the zone and press L: the beam catches it, brakes it, turns it upright, lines it up and sets it down on the pad, where it becomes one body with the carrier (the game's own joint system, the one docking doors use) - no more hull collisions, jitter or ships sliding off a moving carrier. Press L again to be lifted off and released where the beam caught you. The host checks every request: the whole ship in the zone, slow enough, not spinning, lighter than the carrier and small enough for the pad, pad free, path clear (hull, ground, players). Landed ships are saved with the world. Multiplayer: the host and every player need the mod. Made to run alongside Ship Performance Fix.",
+    "thumbnail": "Thumbnail.png"
+}
