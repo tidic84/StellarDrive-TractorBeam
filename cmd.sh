@@ -6,4 +6,4 @@ LOG="$GAME/MelonLoader/Latest.log"
 before=$(wc -l < "$LOG")
 printf '%s\n' "$@" > "$GAME/UserData/stellar_tractor_cmd.txt"
 sleep "${WAIT:-2}"
-tail -n +$((before+1)) "$LOG" | grep -aE "\[TractorBeam\]|Exception|rror" | cut -c1-400
+tail -n +$((before+1)) "$LOG" | grep -aE "\[ParkingTractorBeam\]|Exception|rror" | cut -c1-400

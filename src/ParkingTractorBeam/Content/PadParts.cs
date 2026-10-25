@@ -9,14 +9,14 @@ using Ships.Interface.Settings;
 using Ships.Parts.DockingDoor;
 using Ships.Interface.Services;
 using Ships.Services;
-using TractorBeam.Docking;
-using TractorBeam.Visual;
+using ParkingTractorBeam.Docking;
+using ParkingTractorBeam.Visual;
 using UI.BuildMenu;
 using UnityEngine;
 using UnityEngine.Localization;
 using Object = UnityEngine.Object;
 
-namespace TractorBeam.Content
+namespace ParkingTractorBeam.Content
 {
     /// <summary>
     /// The three tractor pads. Each is a copy of the game's targeting computer (so placement, saving, network sync, the
@@ -64,7 +64,7 @@ namespace TractorBeam.Content
                     return;
                 }
                 // the game indexes parts by id: a second part with one of our ids would break every world load
-                PartSettings taken = all.FirstOrDefault(p => Pads.Spec(p.id) != null && !p.name.StartsWith("TractorBeam."));
+                PartSettings taken = all.FirstOrDefault(p => Pads.Spec(p.id) != null && !p.name.StartsWith("ParkingTractorBeam."));
                 if (taken != null)
                 {
                     TractorMod.Log.Error($"Part id {taken.id} is already used by \"{taken.name}\" (another mod): tractor pads disabled.");
@@ -98,13 +98,11 @@ namespace TractorBeam.Content
         private static PartSettings Build(PartSettings display, PadSpec spec, int size, ItemSettings[] items)
         {
             PartSettings p = Object.Instantiate(display);
-            p.name = "TractorBeam.Pad" + spec.Id;
+            p.name = "ParkingTractorBeam.Pad" + spec.Id;
             p.id = spec.Id;
             string w = spec.Width.ToString("0"), hgt = spec.Height.ToString("0");
-            p.fullLabel = Loc.T($"Rayon tracteur ({spec.Fr})", $"Tractor beam ({spec.En})");
-            p.description = Loc.T(
-                $"Plateforme d'appontage : zone de {w} × {w} m sur {hgt} m de haut au-dessus d'elle. Un pilote dont le vaisseau est entièrement dans la zone appuie sur la touche d'appontage (L) : le rayon le saisit et le pose sur la plateforme, où il fait corps avec le vaisseau porteur. La même touche le fait repartir.",
-                $"Landing pad: a {w} × {w} m zone, {hgt} m high, above it. A pilot whose ship is entirely inside the zone presses the landing key (L): the beam catches the ship and sets it down on the pad, where it becomes part of the carrier. The same key lets it go again.");
+            p.fullLabel = $"Parking tractor beam ({spec.Name})";
+            p.description = $"Landing pad: a {w} × {w} m zone, {hgt} m high, above it. A pilot whose ship is in the zone presses the landing key (L): the beam catches the ship and parks it at the pad's parking spot, where it becomes part of the carrier. Press E on the pad to set the zone and the parking spot. The same key lets it go again.";
             p.localizedDescription = new LocalizedString();
             p.mass = 40f * size;
             var cost = new List<ItemInstance>();
@@ -117,7 +115,7 @@ namespace TractorBeam.Content
             Object.DontDestroyOnLoad(p);
 
             GameObject prefab = Object.Instantiate(display.part, Assets.TemplateRoot);
-            prefab.name = "TractorBeam.Pad" + spec.Id;
+            prefab.name = "ParkingTractorBeam.Pad" + spec.Id;
             var boundsCenter = new Vector3(0f, Pads.TopHeight * 0.5f, 0f);
             var boundsSize = new Vector3(1f, Pads.TopHeight, 1f);
             ShipPartBounds bounds = prefab.GetComponent<ShipPartBounds>();

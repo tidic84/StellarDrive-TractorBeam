@@ -1,21 +1,21 @@
 using MelonLoader;
-using TractorBeam.Client;
-using TractorBeam.Content;
-using TractorBeam.Core;
-using TractorBeam.Docking;
-using TractorBeam.Net;
-using TractorBeam.Visual;
+using ParkingTractorBeam.Client;
+using ParkingTractorBeam.Content;
+using ParkingTractorBeam.Core;
+using ParkingTractorBeam.Docking;
+using ParkingTractorBeam.Net;
+using ParkingTractorBeam.Visual;
 using UnityEngine.SceneManagement;
 
-[assembly: MelonInfo(typeof(TractorBeam.TractorMod), "TractorBeam", "0.2.0", "tidic84")]
+[assembly: MelonInfo(typeof(ParkingTractorBeam.TractorMod), "ParkingTractorBeam", "0.3.0", "tidic84")]
 [assembly: MelonGame("CuriousOwlGames", "StellarDrive")]
 
-namespace TractorBeam
+namespace ParkingTractorBeam
 {
     public partial class TractorMod : MelonMod
     {
         internal const string MainGameScene = "MainGame";
-        internal const int ProtocolVersion = 1;
+        internal const int ProtocolVersion = 2;
 
         internal static TractorMod Instance { get; private set; }
         internal static MelonLogger.Instance Log => Instance.LoggerInstance;
@@ -25,7 +25,7 @@ namespace TractorBeam
         public override void OnInitializeMelon()
         {
             Instance = this;
-            MelonPreferences_Category prefs = MelonPreferences.CreateCategory("TractorBeam", "Tractor Beam");
+            MelonPreferences_Category prefs = MelonPreferences.CreateCategory("ParkingTractorBeam", "Parking Tractor Beam");
             PadParts.Patch(HarmonyInstance);
             Docks.Patch(HarmonyInstance);
             PadConfigs.Patch(HarmonyInstance);
@@ -35,7 +35,11 @@ namespace TractorBeam
 #if DEV
             DevInit();
 #endif
-            Log.Msg("TractorBeam ready.");
+            // its former name: both at once register the same parts twice and the world never loads
+            foreach (MelonBase m in MelonBase.RegisteredMelons)
+                if (m.Info.Name == "TractorBeam")
+                    Log.Error("Tractor Beam (the former name of this mod) is installed too: remove Mods/TractorBeam.dll.");
+            Log.Msg("ParkingTractorBeam ready.");
         }
 
         public override void OnSceneWasLoaded(int buildIndex, string sceneName)

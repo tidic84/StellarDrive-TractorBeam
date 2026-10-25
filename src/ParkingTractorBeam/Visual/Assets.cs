@@ -1,7 +1,7 @@
 using System.Linq;
 using UnityEngine;
 
-namespace TractorBeam.Visual
+namespace ParkingTractorBeam.Visual
 {
     /// <summary>Materials borrowed from the game, so what the mod draws matches it.</summary>
     internal static class Assets
@@ -20,7 +20,7 @@ namespace TractorBeam.Visual
             {
                 if (_root == null)
                 {
-                    _root = new GameObject("TractorBeam.Templates");
+                    _root = new GameObject("ParkingTractorBeam.Templates");
                     _root.transform.position = new Vector3(0f, -100000f, 0f);
                     Object.DontDestroyOnLoad(_root);
                 }
@@ -41,7 +41,7 @@ namespace TractorBeam.Visual
 
         public static Material Glow(Color c, float intensity)
         {
-            var m = new Material(Spark) { name = "TractorBeam.Glow" };
+            var m = new Material(Spark) { name = "ParkingTractorBeam.Glow" };
             m.SetColor("_BaseColor", Color.white);
             m.SetColor("_EmissionColor", c * intensity);
             m.SetColor("_Color", Color.white);
@@ -51,7 +51,7 @@ namespace TractorBeam.Visual
         /// <summary>A flat colour on the spark material (lines: it does not take vertex colours).</summary>
         public static Material Tint(Color c, float intensity)
         {
-            var m = new Material(Spark) { name = "TractorBeam.Tint" };
+            var m = new Material(Spark) { name = "ParkingTractorBeam.Tint" };
             m.SetColor("_BaseColor", c);
             m.SetColor("_Color", c);
             m.SetColor("_EmissionColor", c * intensity);

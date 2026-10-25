@@ -2,13 +2,13 @@ using System.Collections.Generic;
 using Ships;
 using Ships.Grid.Model;
 using Ships.Interface.Model.Parts;
-using TractorBeam.Core;
-using TractorBeam.Docking;
-using TractorBeam.Visual;
+using ParkingTractorBeam.Core;
+using ParkingTractorBeam.Docking;
+using ParkingTractorBeam.Visual;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
-namespace TractorBeam.Client
+namespace ParkingTractorBeam.Client
 {
     /// <summary>
     /// The beam itself: a translucent cone from the pad's emitter to the bottom of the held ship, with bright bands
@@ -103,9 +103,9 @@ namespace TractorBeam.Client
         private void Build(Transform parent)
         {
             Destroy();
-            _go = new GameObject("TractorBeam.Beam");
+            _go = new GameObject("ParkingTractorBeam.Beam");
             _go.transform.SetParent(parent, false);
-            _mesh = new Mesh { name = "TractorBeam.Beam" };
+            _mesh = new Mesh { name = "ParkingTractorBeam.Beam" };
             _mesh.MarkDynamic();
             var verts = new Vector3[Around * Along * 2];
             var uv = new Vector2[verts.Length];
@@ -138,58 +138,6 @@ namespace TractorBeam.Client
             if (_mesh != null) Object.Destroy(_mesh);
             _go = null;
             _mesh = null;
-        }
-    }
-
-    /// <summary>The edges of a pad's landing zone, under the carrier's visual object.</summary>
-    internal sealed class ZoneOutline
-    {
-        private static readonly Dictionary<Color, Material> Materials = new Dictionary<Color, Material>();
-        private readonly GameObject _go;
-        private readonly LineRenderer _line;
-        private Color _color = Color.clear;
-        private readonly Zone _zone;
-
-        public bool Broken => _go == null;
-
-        public bool Shows(Zone z) => z.Bottom == _zone.Bottom && z.Size == _zone.Size;
-
-        public ZoneOutline(Transform parent, Vector3 pos, Quaternion rot, Zone zone)
-        {
-            _zone = zone;
-            _go = new GameObject("TractorBeam.Zone");
-            _go.transform.SetParent(parent, false);
-            _go.transform.localPosition = pos;
-            _go.transform.localRotation = rot;
-            _line = _go.AddComponent<LineRenderer>();
-            _line.useWorldSpace = false;
-            _line.widthMultiplier = 0.06f;
-            _line.numCornerVertices = 0;
-            _line.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            float hx = zone.Size.x * 0.5f, hz = zone.Size.z * 0.5f, y0 = zone.Bottom.y + 0.02f, y1 = zone.Bottom.y + zone.Size.y;
-            Vector3 o = zone.Bottom;
-            Vector3 B(float x, float z) => new Vector3(o.x + x * hx, y0, o.z + z * hz);
-            Vector3 T(float x, float z) => new Vector3(o.x + x * hx, y1, o.z + z * hz);
-            var pts = new[]
-            {
-                B(-1, -1), B(1, -1), B(1, 1), B(-1, 1), B(-1, -1), T(-1, -1), T(1, -1), B(1, -1), T(1, -1), T(1, 1), B(1, 1), T(1, 1), T(-1, 1), B(-1, 1), T(-1, 1), T(-1, -1),
-            };
-            _line.positionCount = pts.Length;
-            _line.SetPositions(pts);
-        }
-
-        public void SetColor(Color c)
-        {
-            if (_line == null || c == _color) return;
-            _color = c;
-            // the glow material ignores vertex colours: one material per colour
-            if (!Materials.TryGetValue(c, out Material m) || m == null) Materials[c] = m = Assets.Tint(c, 1.2f);
-            _line.sharedMaterial = m;
-        }
-
-        public void Destroy()
-        {
-            if (_go != null) Object.Destroy(_go);
         }
     }
 }

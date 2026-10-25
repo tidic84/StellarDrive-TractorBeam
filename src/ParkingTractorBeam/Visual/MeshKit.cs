@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
-namespace TractorBeam.Visual
+namespace ParkingTractorBeam.Visual
 {
     /// <summary>
     /// A surface finish: an area of the game's hand-drawn tool atlas (ink, flat or hatched) and a colour of the

@@ -13,11 +13,11 @@ using Ships.Interface.Model.Joints;
 using Ships.Interface.Model.Parts;
 using Ships.Interface.Model.State;
 using Ships.Physics;
-using TractorBeam.Core;
-using TractorBeam.Net;
+using ParkingTractorBeam.Core;
+using ParkingTractorBeam.Net;
 using UnityEngine;
 
-namespace TractorBeam.Docking
+namespace ParkingTractorBeam.Docking
 {
     /// <summary>Answers to a landing or take-off request (sent back to the pilot).</summary>
     internal enum Verdict : byte
@@ -152,11 +152,12 @@ namespace TractorBeam.Docking
     internal static class Tractor
     {
         public const float HoverHeight = 1.5f;
-        public const float MaxRelativeSpeed = 12f;
+        public const float MaxRelativeSpeed = 100f;
         public const float MaxRelativeSpin = 0.8f;
         public const float SetDownSeconds = 1.8f;
         public const float LiftSeconds = 1.6f;
         public const float BrakeDistance = 1.5f;
+        public const float MaxBrakeDistance = 10f;
         private const float Shrink = 0.05f;
 
         public static readonly Dictionary<uint, TractorOp> Ops = new Dictionary<uint, TractorOp>();
@@ -285,8 +286,12 @@ namespace TractorBeam.Docking
             var (padPos, padRot) = Pads.Frame(pad);
             Quaternion padWorldRot = ptr.rotation * padRot;
             Vector3 padWorld = ptr.TransformPoint(padPos);
+            // its centre in the zone, and not sticking out of it by more than the overhang allowed
+            Quaternion toPad = Quaternion.Inverse(padWorldRot);
+            if (!Pads.InZone(zone, toPad * (center - padWorld))) return Verdict.NotInside;
+            float overhang = Pads.Overhang(zone);
             foreach (Vector3 c in Corners(box))
-                if (!Pads.InZone(zone, Quaternion.Inverse(padWorldRot) * (ct.TransformPoint(c) - padWorld), 0.05f))
+                if (!Pads.InZone(zone, toPad * (ct.TransformPoint(c) - padWorld), overhang))
                     return Verdict.NotInside;
 
             Rigidbody root = ptr.GetComponentInParent<Rigidbody>();
@@ -296,17 +301,12 @@ namespace TractorBeam.Docking
             Vector3 carrierSpin = root != null && !root.isKinematic ? root.angularVelocity : Vector3.zero;
             if ((crb.angularVelocity - carrierSpin).magnitude > MaxRelativeSpin) return Verdict.Spinning;
 
-            // landed pose: upright on the pad, heading turned to the nearest quarter of the pad's forward
-            Quaternion inPad = Quaternion.Inverse(padWorldRot) * ct.rotation;
-            Vector3 f = inPad * Vector3.forward;
-            f.y = 0f;
-            float yaw = f.sqrMagnitude < 1e-4f ? 0f : Mathf.Round(Mathf.Atan2(f.x, f.z) * Mathf.Rad2Deg / 90f) * 90f;
-            Quaternion landedInPad = Quaternion.Euler(0f, yaw, 0f);
+            // landed pose: upright on the parking spot, facing the set heading (or the nearest quarter of the pad's forward)
+            PadConfig config = PadConfigs.Get(carrier.Id, pad);
+            var (landedPosInPad, landedInPad) = Pads.Landed(config, box, Quaternion.Inverse(padWorldRot) * ct.rotation);
             Bounds turned = Turned(box, landedInPad);
             if (turned.extents.x > spec.Width * 0.5f || turned.extents.z > spec.Width * 0.5f || turned.size.y + HoverHeight > spec.Height)
                 return Verdict.TooBig;
-            Vector3 bottom = new Vector3(box.center.x, box.min.y, box.center.z);
-            Vector3 landedPosInPad = new Vector3(0f, Pads.Gap, 0f) - landedInPad * bottom;
             var landed = new Pose(padPos + padRot * landedPosInPad, padRot * landedInPad);
             var hover = new Pose(landed.P + padRot * Vector3.up * HoverHeight, landed.R);
 
@@ -314,8 +314,9 @@ namespace TractorBeam.Docking
             Quaternion inv = Quaternion.Inverse(ptr.rotation);
             var start = new Pose(inv * (ct.position - ptr.position), inv * ct.rotation);
             Vector3 v0 = inv * relVel;
-            // the beam stops it within BrakeDistance (at most ~2.5 g for a ship at the speed limit)
-            float brake = Mathf.Clamp(2f * BrakeDistance / Mathf.Max(v0.magnitude, 0.01f), 0.25f, 1f);
+            // the beam stops it within a short distance: BrakeDistance when slow, up to MaxBrakeDistance when fast
+            float speed = Mathf.Max(v0.magnitude, 0.01f);
+            float brake = Mathf.Clamp(2f * Mathf.Clamp(speed * 0.1f, BrakeDistance, MaxBrakeDistance) / speed, 0.15f, 1f);
             var caught = new Pose(start.P + v0 * (brake * 0.5f), start.R);
 
             // the spot itself first: no route helps if the ship does not fit on the pad
@@ -329,7 +330,7 @@ namespace TractorBeam.Docking
                 op.Legs.Add(new Leg { Ease = Leg.Kind.Brake, A = start, B = caught, V0 = v0, Duration = brake });
                 op.Legs.Add(Carry(caught, hover, route));
                 op.Legs.Add(new Leg { Ease = Leg.Kind.SetDown, A = hover, B = landed, Duration = SetDownSeconds });
-                if (!PathClear(ship, ct, shapes, ptr, op, 1)) continue;
+                if (!PathClear(ship, ct, shapes, ptr, op, 0)) continue;
                 Begin(op);
                 return Verdict.Landing;
             }
@@ -625,8 +626,10 @@ namespace TractorBeam.Docking
                 Leg leg = op.Legs[l];
                 // a sample every half metre and every 10 degrees of turn
                 int samples = Mathf.Clamp(Mathf.CeilToInt(leg.Length / 0.5f) + Mathf.CeilToInt(Quaternion.Angle(leg.A.R, leg.B.R) / 10f), 2, 160);
-                // leaving, the ship already sits at the start of its path: what touches it there does not count
-                for (int k = op.Launch && l == firstLeg ? 1 : 0; k <= samples; k++)
+                // the ship already sits at the start of its path (on the pad, or where the beam catches it): what
+                // touches it there does not count
+                bool fromShip = l == 0 && (op.Launch || op.Legs[0].Ease == Leg.Kind.Brake);
+                for (int k = fromShip ? 1 : 0; k <= samples; k++)
                 {
                     Pose p = leg.Sample(leg.Duration * k / samples);
                     Vector3 pos = carrier.TransformPoint(p.P);

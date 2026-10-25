@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace TractorBeam.Visual
+namespace ParkingTractorBeam.Visual
 {
     /// <summary>
     /// The tractor pad: a low bolted plate (its top is the landing surface, <see cref="Docking.Pads.TopHeight"/>) with
@@ -41,7 +41,7 @@ namespace TractorBeam.Visual
                 k.Box(new Vector3(0.025f, 0.101f, z), new Vector3(0.05f, 0.002f, 0.014f), Shade.Orange);
             }
             var root = new GameObject("TractorPadModel");
-            Assets.MeshChild(root.transform, "Body", k.Build("TractorBeam.Pad" + size), Assets.ToolAtlas);
+            Assets.MeshChild(root.transform, "Body", k.Build("ParkingTractorBeam.Pad" + size), Assets.ToolAtlas);
             return root;
         }
     }

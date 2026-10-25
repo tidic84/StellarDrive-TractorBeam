@@ -1,11 +1,13 @@
 {
-    "id": "tractorbeam",
-    "name": "Tractor Beam",
+    "id": "parkingtractorbeam",
+    "name": "Parking Tractor Beam",
     "author": "tidic84",
-    "version": "0.2.0",
-    "description": "Tractor beam landing pads for big ships. Build a pad (small, medium or large) on your carrier and place its landing zone from the pad's menu (E): on the pad, outside the hull, in front of a hangar door... A pad that holds a ship has its zone switched off. Fly a smaller ship entirely into the zone and press L: the beam catches it, brakes it, turns it upright, lines it up and carries it to the pad, going around the hull if it has to, and sets it down, where it becomes one body with the carrier (the game's own joint system, the one docking doors use) - no more hull collisions, jitter or ships sliding off a moving carrier. Press L again to be lifted off and released where the beam caught you. The host checks every request: the whole ship in the zone, slow enough, not spinning, lighter than the carrier and small enough for the pad, pad free, path clear (hull, ground, players). Landed ships are saved with the world. Multiplayer: the host and every player need the mod. Made to run alongside Ship Performance Fix.",
+    "version": "0.3.0",
+    "description": "Tractor beam landing pads for big ships (formerly Tractor Beam: remove the old mod). Build a pad (small, medium or large) on your carrier and set it up from its menu (E), with a live view of the carrier: the landing zone (on the pad, outside the hull, in front of a hangar door...) and the parking spot where landed ships are set down, with the way they face. Fly a smaller ship into the zone (the box where it will be parked is shown) and press L: the beam catches it (up to 100 m/s), brakes it, turns it upright, lines it up and carries it to its parking spot, going around the hull if it has to, and sets it down, where it becomes one body with the carrier (the game's own joint system, the one docking doors use) - no more hull collisions, jitter or ships sliding off a moving carrier. Press L again to be lifted off and released where the beam caught you. Zones can be shown always, only while piloting, or never. The host checks every request: the ship in the zone (its centre inside, sticking out only a little), slow enough, not spinning, lighter than the carrier and small enough for the pad, pad free, path clear (hull, ground, players). Landed ships are saved with the world. English only. Multiplayer: the host and every player need the mod. Made to run alongside Ship Performance Fix.",
     "thumbnail": "Thumbnail.png",
     "ai": "vibecoded",
     "development": "active",
-    "tags": ["ships"]
+    "tags": [
+        "ships"
+    ]
 }

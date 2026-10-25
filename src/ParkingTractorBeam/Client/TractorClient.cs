@@ -6,23 +6,31 @@ using Ships;
 using Ships.Grid.Model;
 using Ships.Interface.Model.Parts;
 using TMPro;
-using TractorBeam.Core;
-using TractorBeam.Docking;
-using TractorBeam.Net;
-using TractorBeam.Visual;
+using ParkingTractorBeam.Core;
+using ParkingTractorBeam.Docking;
+using ParkingTractorBeam.Net;
+using ParkingTractorBeam.Visual;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using Object = UnityEngine.Object;
 
-namespace TractorBeam.Client
+namespace ParkingTractorBeam.Client
 {
+    /// <summary>When the landing zones and parking spots are drawn (the pad whose menu is open always shows its own).</summary>
+    internal enum ZoneDisplay
+    {
+        Always,
+        Piloting,
+        Never,
+    }
+
     /// <summary>
     /// The pilot's side: the landing key, the prompt and the host's answers on screen, the outline of the landing
-    /// zones nearby, and the beams the host announces.
+    /// zones nearby with their parking spots, where the piloted ship would be set down, and the beams the host announces.
     /// </summary>
     internal static class TractorClient
     {
-        private static MelonPreferences_Entry<string> _key;
+        private static MelonPreferences_Entry<string> _key, _display;
         private static InputControl _control;
         private static string _controlPath;
         private static bool _wasPressed;
@@ -33,11 +41,14 @@ namespace TractorBeam.Client
         private static float _messageUntil;
 
         private static readonly Dictionary<uint, Beam> Beams = new Dictionary<uint, Beam>();
-        private static readonly Dictionary<(uint, ushort), ZoneOutline> Outlines = new Dictionary<(uint, ushort), ZoneOutline>();
+        private static readonly Dictionary<(uint, ushort, int), Marker> Markers = new Dictionary<(uint, ushort, int), Marker>();
+        private const int ZoneMarker = 0, ParkMarker = 1, GhostMarker = 2;
 
         public static void Init(MelonPreferences_Category prefs)
         {
             _key = prefs.CreateEntry("LandKey", "<Keyboard>/l", "Landing key", "Input control path of the key that asks the tractor beam to land or launch the ship you pilot.");
+            _display = prefs.CreateEntry("ShowZones", nameof(ZoneDisplay.Always), "Show zones",
+                "When the landing zones and parking spots are drawn: Always (near them), Piloting (only at the controls of a ship) or Never. Also set from a pad's menu.");
             TractorNet.OnClient(Op.Result, OnResult);
             TractorNet.OnClient(Op.Beam, OnBeam);
         }
@@ -46,11 +57,21 @@ namespace TractorBeam.Client
         {
             foreach (Beam b in Beams.Values) b.Destroy();
             Beams.Clear();
-            foreach (ZoneOutline o in Outlines.Values) o.Destroy();
-            Outlines.Clear();
+            foreach (Marker m in Markers.Values) m.Destroy();
+            Markers.Clear();
             if (_canvas != null) Object.Destroy(_canvas.gameObject);
             _canvas = null;
             _control = null;
+        }
+
+        public static ZoneDisplay Display
+        {
+            get => System.Enum.TryParse(_display.Value, true, out ZoneDisplay d) ? d : ZoneDisplay.Always;
+            set
+            {
+                _display.Value = value.ToString();
+                MelonPreferences.Save();
+            }
         }
 
         // ------------------------------------------------------------------ network
@@ -80,21 +101,21 @@ namespace TractorBeam.Client
         {
             switch (v)
             {
-                case Verdict.Landing: return Loc.T("Rayon tracteur verrouillé : appontage en cours.", "Tractor beam locked: landing.");
-                case Verdict.Launching: return Loc.T("Rayon tracteur : décollage.", "Tractor beam: launching.");
-                case Verdict.NotPiloting: return Loc.T("Prenez les commandes du vaisseau pour demander l'appontage.", "Take the controls of the ship to ask for landing.");
-                case Verdict.Busy: return Loc.T("Le rayon tracteur tient déjà ce vaisseau.", "The tractor beam is already holding this ship.");
-                case Verdict.NoZone: return Loc.T("Aucune zone d'appontage ici : entrez dans la zone d'un rayon tracteur.", "No landing zone here: fly into a tractor beam's zone.");
-                case Verdict.NotInside: return Loc.T("Le vaisseau doit être entièrement dans la zone.", "The whole ship must be inside the zone.");
-                case Verdict.TooFast: return Loc.T($"Trop rapide : ralentissez sous {Tractor.MaxRelativeSpeed:0} m/s par rapport au porteur.", $"Too fast: slow down under {Tractor.MaxRelativeSpeed:0} m/s relative to the carrier.");
-                case Verdict.Spinning: return Loc.T("Stabilisez le vaisseau : il tourne trop vite.", "Steady the ship: it is spinning too fast.");
-                case Verdict.TooBig: return Loc.T("Ce vaisseau est trop grand pour cette plateforme.", "This ship is too big for this pad.");
-                case Verdict.PadBusy: return Loc.T("La plateforme est déjà occupée.", "The pad is already taken.");
-                case Verdict.Blocked: return Loc.T("Passage encombré : quelque chose gêne entre le vaisseau et la plateforme.", "Path blocked: something is in the way between the ship and the pad.");
-                case Verdict.Jointed: return Loc.T("Ce vaisseau est déjà amarré à un autre (porte d'amarrage ou rotor).", "This ship is already joined to another one (docking door or rotor).");
-                case Verdict.Anchored: return Loc.T("Levez l'ancre avant l'appontage.", "Raise the anchor before landing.");
-                case Verdict.Heavier: return Loc.T("Le porteur doit être plus lourd que le vaisseau à poser.", "The carrier must be heavier than the ship to land.");
-                case Verdict.NoRoom: return Loc.T("Pas assez de place sur la plateforme pour ce vaisseau : il toucherait la coque.", "Not enough room on the pad for this ship: it would touch the hull.");
+                case Verdict.Landing: return "Tractor beam locked: landing.";
+                case Verdict.Launching: return "Tractor beam: launching.";
+                case Verdict.NotPiloting: return "Take the controls of the ship to ask for landing.";
+                case Verdict.Busy: return "The tractor beam is already holding this ship.";
+                case Verdict.NoZone: return "No landing zone here: fly into a tractor beam's zone.";
+                case Verdict.NotInside: return "Get further into the zone: the ship's centre must be inside it, and it may stick out only a little.";
+                case Verdict.TooFast: return $"Too fast: slow down under {Tractor.MaxRelativeSpeed:0} m/s relative to the carrier.";
+                case Verdict.Spinning: return "Steady the ship: it is spinning too fast.";
+                case Verdict.TooBig: return "This ship is too big for this pad.";
+                case Verdict.PadBusy: return "The pad is already taken.";
+                case Verdict.Blocked: return "Path blocked: something is in the way between the ship and the pad.";
+                case Verdict.Jointed: return "This ship is already joined to another one (docking door or rotor).";
+                case Verdict.Anchored: return "Raise the anchor before landing.";
+                case Verdict.Heavier: return "The carrier must be heavier than the ship to land.";
+                case Verdict.NoRoom: return "Not enough room at the parking spot for this ship: it would touch the hull.";
                 default: return v.ToString();
             }
         }
@@ -159,11 +180,11 @@ namespace TractorBeam.Client
             string text = null;
             if (piloted != 0)
             {
-                if (Docks.Known.ContainsKey(piloted)) text = Loc.T($"[{KeyName()}] Décoller du rayon tracteur", $"[{KeyName()}] Launch from the tractor beam");
+                if (Docks.Known.ContainsKey(piloted)) text = $"[{KeyName()}] Launch from the tractor beam";
                 else if (!Beams.ContainsKey(piloted) && FindZone(piloted, out bool inside, out PadSpec spec))
                     text = inside
-                        ? Loc.T($"[{KeyName()}] Demander l'appontage (rayon tracteur {spec.Fr})", $"[{KeyName()}] Request landing ({spec.En} tractor beam)")
-                        : Loc.T("Zone d'appontage : entrez-y entièrement", "Landing zone: get the whole ship inside");
+                        ? $"[{KeyName()}] Request landing ({spec.Name} tractor beam)"
+                        : "Landing zone: get further in";
             }
             _prompt.gameObject.SetActive(text != null);
             if (text != null) _prompt.text = text;
@@ -204,9 +225,11 @@ namespace TractorBeam.Client
                     best = d;
                     spec = Pads.Spec(p);
                     found = new PartContext(other.Id, p.Id);
-                    inside = true;
+                    // as the host checks it: the centre in the zone, sticking out by no more than the overhang allowed
+                    inside = Pads.InZone(z, local);
+                    float overhang = Pads.Overhang(z);
                     foreach (Vector3 c in Tractor.Corners(box))
-                        if (!Pads.InZone(z, inv * (ct.TransformPoint(c) - padWorld), 0.05f))
+                        if (inside && !Pads.InZone(z, inv * (ct.TransformPoint(c) - padWorld), overhang))
                         {
                             inside = false;
                             break;
@@ -217,19 +240,23 @@ namespace TractorBeam.Client
         }
 
         /// <summary>
-        /// Zone outlines of the free pads near the camera: green when the piloted ship is entirely inside. The pad whose
-        /// menu is open always shows its zone (orange while the pad is taken: the zone is off).
+        /// Zone outlines of the free pads near the camera with their parking spots (green when the piloted ship is
+        /// inside enough to be caught), and the box where the piloted ship would be set down; as the display setting says. The pad
+        /// whose menu is open always shows its zone and the space its parking spot takes, through the hull (orange while
+        /// the pad is taken: the zone is off).
         /// </summary>
         private static void UpdateOutlines(uint piloted)
         {
             var ships = Svc.ShipsClient;
             Camera cam = Camera.main;
-            var seen = new HashSet<(uint, ushort)>();
+            var seen = new HashSet<(uint, ushort, int)>();
+            ZoneDisplay display = Display;
+            bool showAll = display == ZoneDisplay.Always || display == ZoneDisplay.Piloting && piloted != 0;
             if (ships != null && cam != null)
             {
                 PartContext target = default;
-                bool inside = false;
-                if (piloted != 0) FindZone(piloted, out inside, out _, out target);
+                bool inside = false, found = false;
+                if (piloted != 0 && showAll) found = FindZone(piloted, out inside, out _, out target);
                 PartContext? editing = PadMenu.Editing;
                 Vector3 eye = cam.transform.position;
                 foreach (TrackedShipClient ship in ships.Ships)
@@ -238,34 +265,65 @@ namespace TractorBeam.Client
                     Transform vt = ship.VisualObject.transform;
                     foreach (StatefulPart p in Pads.PadsOf(ship))
                     {
-                        var key = (ship.Id, p.Id);
                         bool edited = editing.HasValue && editing.Value.ShipId == ship.Id && editing.Value.PartId == p.Id;
                         bool busy = PadBusy(ship.Id, p.Id);
-                        Zone z = Pads.ZoneOf(ship.Id, p);
+                        PadConfig c = PadConfigs.Get(ship.Id, p);
+                        Zone z = c.Zone;
                         var (pp, pr) = Pads.Frame(p);
                         Vector3 local = Quaternion.Inverse(vt.rotation * pr) * (eye - vt.TransformPoint(pp));
-                        if (!edited && (busy || !Pads.InZone(z, local, 25f))) continue;
-                        seen.Add(key);
-                        if (!Outlines.TryGetValue(key, out ZoneOutline o) || o.Broken || !o.Shows(z))
-                        {
-                            o?.Destroy();
-                            Outlines[key] = o = new ZoneOutline(vt, pp, pr, z);
-                        }
-                        bool here = inside && target.ShipId == ship.Id && target.PartId == p.Id;
-                        o.SetColor(edited && busy ? UiColors.Warning : edited ? UiColors.Edit : here ? UiColors.Good : UiColors.Accent);
+                        if (!edited && (!showAll || busy || !Pads.InZone(z, local, 25f))) continue;
+                        bool here = found && target.ShipId == ship.Id && target.PartId == p.Id;
+                        Color zc = edited && busy ? UiColors.Warning : edited ? UiColors.Edit : here && inside ? UiColors.Good : UiColors.Accent;
+                        Keep(seen, (ship.Id, p.Id, ZoneMarker), ("zone", z.Bottom, z.Size, edited), () => Marker.Zone(vt, pp, pr, z, edited), zc, edited);
+                        PadSpec spec = Pads.Spec(p);
+                        Keep(seen, (ship.Id, p.Id, ParkMarker), ("park", c.Park, c.Heading, edited), () => Marker.Park(vt, pp, pr, spec, c, edited),
+                            edited && busy ? UiColors.Warning : UiColors.Park, edited);
+                        if (here && Ghost(piloted, ship, vt, pp, pr, c, out Vector3 gp, out Quaternion gr, out Bounds box))
+                            Keep(seen, (ship.Id, p.Id, GhostMarker), ("ghost", gp, gr, box.center, box.size), () => Marker.Ghost(vt, gp, gr, box),
+                                inside ? UiColors.Good : UiColors.Park, false);
                     }
                 }
             }
-            List<(uint, ushort)> gone = null;
-            foreach (var key in Outlines.Keys)
+            List<(uint, ushort, int)> gone = null;
+            foreach (var key in Markers.Keys)
                 if (!seen.Contains(key))
-                    (gone ??= new List<(uint, ushort)>()).Add(key);
+                    (gone ??= new List<(uint, ushort, int)>()).Add(key);
             if (gone != null)
                 foreach (var key in gone)
                 {
-                    Outlines[key].Destroy();
-                    Outlines.Remove(key);
+                    Markers[key].Destroy();
+                    Markers.Remove(key);
                 }
+        }
+
+        private static void Keep(HashSet<(uint, ushort, int)> seen, (uint, ushort, int) slot, object shape, System.Func<Marker> make, Color color, bool onTop)
+        {
+            seen.Add(slot);
+            if (!Markers.TryGetValue(slot, out Marker m) || m.Broken || !Equals(m.Key, shape))
+            {
+                m?.Destroy();
+                Markers[slot] = m = make();
+            }
+            m.Show(color, onTop);
+        }
+
+        /// <summary>
+        /// Where the piloted ship would be set down on that pad (as the host computes it, from the hull box), in the
+        /// carrier's visual frame.
+        /// </summary>
+        private static bool Ghost(uint piloted, TrackedShipClient carrier, Transform vt, Vector3 pp, Quaternion pr, PadConfig c, out Vector3 pos, out Quaternion rot, out Bounds box)
+        {
+            pos = default;
+            rot = default;
+            box = default;
+            if (!Svc.ShipsClient.TryGetTrackedShip(piloted, out TrackedShipClient ship) || !ship.IsVisualLoaded || ship.VisualObject == null) return false;
+            CoordBounds hb = ship.GetHullCoordBounds();
+            box = new Bounds(hb.Center, hb.Extents * 2f);
+            Quaternion shipInPad = Quaternion.Inverse(vt.rotation * pr) * ship.VisualObject.transform.rotation;
+            var (lp, lr) = Pads.Landed(c, box, shipInPad);
+            pos = pp + pr * lp;
+            rot = pr * lr;
+            return true;
         }
 
         public static bool PadBusy(uint parent, ushort pad)
@@ -292,7 +350,7 @@ namespace TractorBeam.Client
         private static void EnsureHud()
         {
             if (_canvas != null) return;
-            _canvas = UiKit.MakeCanvas("TractorBeam.Hud", 40);
+            _canvas = UiKit.MakeCanvas("ParkingTractorBeam.Hud", 40);
             RectTransform root = (RectTransform)_canvas.transform;
             _prompt = UiKit.Label(UiKit.Rect(root, "Prompt", new Vector2(0.5f, 0.7f), new Vector2(0.5f, 0.7f), new Vector2(0f, 0f), new Vector2(2400f, 80f)),
                 "", 46f, UiColors.Text, true, TextAlignmentOptions.Center);
@@ -318,5 +376,6 @@ namespace TractorBeam.Client
         public static readonly Color Warning = new Color(1f, 0.55f, 0.32f, 1f);
         public static readonly Color Good = new Color(0.45f, 0.9f, 0.55f, 1f);
         public static readonly Color Edit = new Color(1f, 0.85f, 0.3f, 1f);
+        public static readonly Color Park = new Color(0.78f, 0.5f, 1f, 1f);
     }
 }

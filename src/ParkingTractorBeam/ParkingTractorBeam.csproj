@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>ParkingTractorBeam</AssemblyName>
+    <RootNamespace>ParkingTractorBeam</RootNamespace>
+    <Version>0.3.0</Version>
+  </PropertyGroup>
+</Project>

@@ -8,13 +8,13 @@ using Ships.Interface.Model.Joints;
 using Ships.Interface.Model.Placement;
 using Ships.Interface.Settings;
 using Stellar.Shared;
-using TractorBeam.Core;
-using TractorBeam.Docking;
+using ParkingTractorBeam.Core;
+using ParkingTractorBeam.Docking;
 using UnityEngine;
 using WorldTracking.Interface.Model;
 using WorldTracking.Interface.Services;
 
-namespace TractorBeam
+namespace ParkingTractorBeam
 {
     /// <summary>
     /// Dev commands (UserData/stellar_tractor_cmd.txt):
@@ -181,19 +181,20 @@ namespace TractorBeam
                     Log.Msg($"[DEV] ship {ship.Id} door {door.Id} undocked from ship {st.DockedConnectedPart.ShipId}");
                 }
             });
-            _harness.Command("press", a => TractorBeam.Net.TractorNet.SendToServer(TractorBeam.Net.Op.Request, null));
+            _harness.Command("press", a => ParkingTractorBeam.Net.TractorNet.SendToServer(ParkingTractorBeam.Net.Op.Request, null));
             _harness.Command("zoneset", a =>
             {
                 // zoneset <carrier> bx by bz sx sy sz: the zone of the carrier's first pad (pad frame), as the menu would
                 TrackedShipServer carrier = Svc.ShipsServer.GetShip(uint.Parse(a[1]));
                 var pad = Pads.PadsOf(carrier).First();
-                var cfg = new PadConfig { Zone = new Zone { Bottom = new Vector3(Fl(a[2]), Fl(a[3]), Fl(a[4])), Size = new Vector3(Fl(a[5]), Fl(a[6]), Fl(a[7])) } }.Clamped(Pads.Spec(pad));
+                var cfg = PadConfigs.Get(carrier.Id, pad).With(new Zone { Bottom = new Vector3(Fl(a[2]), Fl(a[3]), Fl(a[4])), Size = new Vector3(Fl(a[5]), Fl(a[6]), Fl(a[7])) }).Clamped(Pads.Spec(pad));
                 PadConfigs.Set(new Ships.Interface.Model.Parts.PartContext(carrier.Id, pad.Id), cfg);
                 Log.Msg($"[DEV] zone of pad {pad.Id}: bottom {cfg.Zone.Bottom} size {cfg.Zone.Size}");
             });
             _harness.Command("bringzone", a =>
             {
-                // bringzone <ship> <carrier> [yaw]: puts the ship in the middle of the carrier's first pad zone, at rest
+                // bringzone <ship> <carrier> [yaw] [speed]: puts the ship in the middle of the carrier's first pad zone, at rest
+                // or moving along the pad's forward at that speed (m/s)
                 var ships = Svc.ShipsServer;
                 TrackedShipServer ship = ships.GetShip(uint.Parse(a[1])), carrier = ships.GetShip(uint.Parse(a[2]));
                 var pad = Pads.PadsOf(carrier).First();
@@ -203,7 +204,8 @@ namespace TractorBeam
                 var b = ship.GetHullCoordBounds();
                 Quaternion rot = pt.rotation * pr * Quaternion.Euler(0f, a.Length > 3 ? Fl(a[3]) : 20f, 0f);
                 Vector3 pos = pt.TransformPoint(pp + pr * z.Center) - rot * b.Center;
-                ServiceLocator.GetService<ISpacesServerProvider>().SetWorldObjectPhysics(ship, carrier.SpaceId, new LocalPhysicsState { Position = pos, Rotation = rot, Velocity = Vector3.zero });
+                Vector3 vel = a.Length > 4 ? pt.rotation * pr * Vector3.forward * Fl(a[4]) : Vector3.zero;
+                ServiceLocator.GetService<ISpacesServerProvider>().SetWorldObjectPhysics(ship, carrier.SpaceId, new LocalPhysicsState { Position = pos, Rotation = rot, Velocity = vel });
                 ship.NotifyRepositioned();
                 Log.Msg($"[DEV] ship {ship.Id} in the zone of pad {pad.Id} of ship {carrier.Id}");
             });
@@ -230,7 +232,7 @@ namespace TractorBeam
             _harness.Command("uiclick", a =>
             {
                 // uiclick <n>: clicks the n-th button of the pad menu (0 = first row's -5)
-                var canvas = GameObject.Find("TractorBeam.PadMenu");
+                var canvas = GameObject.Find("ParkingTractorBeam.PadMenu");
                 var buttons = canvas.GetComponentsInChildren<UnityEngine.UI.Button>();
                 buttons[int.Parse(a[1])].onClick.Invoke();
                 Log.Msg($"[DEV] clicked button {a[1]} of {buttons.Length}");
@@ -238,7 +240,37 @@ namespace TractorBeam
             _harness.Command("state", a =>
             {
                 Svc.PlayersClient.TryGetLocalPlayerState(out Players.Interface.Model.PlayerState st);
-                Log.Msg($"[DEV] player {st.Type} {st.EntityId}/{st.PartId}, menu {(GameObject.Find("TractorBeam.PadMenu")?.activeSelf == true ? "open" : "closed")}, cursor {Cursor.lockState}");
+                Log.Msg($"[DEV] player {st.Type} {st.EntityId}/{st.PartId}, menu {(GameObject.Find("ParkingTractorBeam.PadMenu")?.activeSelf == true ? "open" : "closed")}, cursor {Cursor.lockState}");
+            });
+            _harness.Command("mat", a =>
+            {
+                // mat: the borrowed spark material's shader, its keywords and blend settings
+                Material m = ParkingTractorBeam.Visual.Assets.Spark;
+                Shader sh = m.shader;
+                var props = Enumerable.Range(0, sh.GetPropertyCount()).Select(i => sh.GetPropertyName(i) + (sh.GetPropertyType(i) == UnityEngine.Rendering.ShaderPropertyType.Float || sh.GetPropertyType(i) == UnityEngine.Rendering.ShaderPropertyType.Range ? "=" + m.GetFloat(sh.GetPropertyName(i)) : ""));
+                Log.Msg($"[DEV] spark: shader {sh.name}, queue {m.renderQueue}, keywords {string.Join(" ", m.shaderKeywords)}, props {string.Join(", ", props)}");
+            });
+            _harness.Command("parkset", a =>
+            {
+                // parkset <carrier> x y z heading: the parking spot of the carrier's first pad (pad frame), as the menu would
+                TrackedShipServer carrier = Svc.ShipsServer.GetShip(uint.Parse(a[1]));
+                var pad = Pads.PadsOf(carrier).First();
+                var cfg = PadConfigs.Get(carrier.Id, pad).With(new Vector3(Fl(a[2]), Fl(a[3]), Fl(a[4])), int.Parse(a[5])).Clamped(Pads.Spec(pad));
+                PadConfigs.Set(new Ships.Interface.Model.Parts.PartContext(carrier.Id, pad.Id), cfg);
+                Log.Msg($"[DEV] parking spot of pad {pad.Id}: {cfg.Park} heading {cfg.Heading}");
+            });
+            _harness.Command("tab", a =>
+            {
+                // tab <0|1>: the pad menu's zone or parking tab
+                HarmonyLib.Traverse.Create(typeof(ParkingTractorBeam.Client.PadMenu)).Method("SetTab", new[] { HarmonyLib.AccessTools.Inner(typeof(ParkingTractorBeam.Client.PadMenu), "Tab") }, new object[] { System.Enum.ToObject(HarmonyLib.AccessTools.Inner(typeof(ParkingTractorBeam.Client.PadMenu), "Tab"), int.Parse(a[1])) }).GetValue();
+            });
+            _harness.Command("orbit", a =>
+            {
+                // orbit yaw pitch zoom: the pad menu's preview camera
+                var t = HarmonyLib.Traverse.Create(typeof(ParkingTractorBeam.Client.PadMenu));
+                t.Field("_yaw").SetValue(Fl(a[1]));
+                t.Field("_pitch").SetValue(Fl(a[2]));
+                t.Field("_zoom").SetValue(Fl(a[3]));
             });
             _harness.Command("land", a => Log.Msg($"[DEV] land {a[1]}: {Tractor.Request(uint.Parse(a[1]))}"));
             _harness.Command("launch", a => Log.Msg($"[DEV] launch {a[1]}: {Tractor.Request(uint.Parse(a[1]))}"));

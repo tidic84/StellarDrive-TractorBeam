@@ -13,12 +13,12 @@ using Ships.Interface.Model.Parts.State;
 using Ships.Interface.Services;
 using Ships.Joints;
 using Ships.Services;
-using TractorBeam.Core;
-using TractorBeam.Net;
+using ParkingTractorBeam.Core;
+using ParkingTractorBeam.Net;
 using UnityEngine;
 using WorldTracking.Interface.Model.Spaces;
 
-namespace TractorBeam.Docking
+namespace ParkingTractorBeam.Docking
 {
     /// <summary>A ship set down on a tractor pad: the host's record of it.</summary>
     internal sealed class DockRecord
@@ -240,7 +240,7 @@ namespace TractorBeam.Docking
                 TrackedShipServer parent = ships.GetShip(rel.ShipId);
                 StatefulPart pad = parent == null ? null : Pads.PadsOf(parent)
                     .Where(p => OnPad(parent.Id, p.Id) == null)
-                    .OrderBy(p => (Pads.Frame(p).pos - ship.Position).sqrMagnitude).FirstOrDefault();
+                    .OrderBy(p => (Pads.ParkPoint(parent.Id, p) - ship.Position).sqrMagnitude).FirstOrDefault();
                 if (pad != null)
                 {
                     TractorMod.Log.Msg($"Ship {ship.Id} sits in ship {parent.Id} with no joint: kept on its pad {pad.Id}.");

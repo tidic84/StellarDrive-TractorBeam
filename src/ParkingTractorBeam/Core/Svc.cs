@@ -7,7 +7,7 @@ using Ships.Services;
 using UnityEngine;
 using WorldTracking.Interface.Services;
 
-namespace TractorBeam.Core
+namespace ParkingTractorBeam.Core
 {
     /// <summary>Per-scene cache over the game's ServiceLocator (which scans tagged objects on every call).</summary>
     internal static class Svc

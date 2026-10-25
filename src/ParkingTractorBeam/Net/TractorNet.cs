@@ -9,7 +9,7 @@ using FishNet.Serializing;
 using FishNet.Transporting;
 using UnityEngine;
 
-namespace TractorBeam.Net
+namespace ParkingTractorBeam.Net
 {
     /// <summary>The single FishNet broadcast the mod uses; the payload is our own binary format (see <see cref="Op"/>).</summary>
     public struct TractorPacket : IBroadcast

@@ -7,7 +7,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using Object = UnityEngine.Object;
 
-namespace TractorBeam.Client
+namespace ParkingTractorBeam.Client
 {
     /// <summary>uGUI with the game's two fonts, on the game's 3840 x 2160 reference canvas (from Arsenal).</summary>
     internal static class UiKit
@@ -96,7 +96,7 @@ namespace TractorBeam.Client
         {
             if (EventSystem.current != null) return;
             if (Object.FindObjectsByType<EventSystem>(FindObjectsSortMode.None).Any()) return;
-            var es = new GameObject("TractorBeam.EventSystem");
+            var es = new GameObject("ParkingTractorBeam.EventSystem");
             Object.DontDestroyOnLoad(es);
             es.AddComponent<EventSystem>();
             es.AddComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
